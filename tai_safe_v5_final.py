@@ -282,6 +282,163 @@ def fetch_real_weather_warnings():
     ]
     return warnings
 
+@st.cache_data(ttl=300)
+def fetch_twipcam_streams(lat=22.9971, lon=120.2218, radius=10):
+    """
+    從 TwipCam API 獲取附近的即時影像串流
+    參數:
+        lat: 緯度（預設為成功大學）
+        lon: 經度（預設為成功大學）
+        radius: 搜尋半徑（公里，用於過濾）
+    """
+    try:
+        # TwipCam API endpoint - 獲取所有攝影機列表
+        url = "https://www.twipcam.com/api/v1/cam-list.json"
+
+        response = requests.get(url, timeout=10, verify=False)
+
+        if response.status_code == 200:
+            cameras = response.json()
+
+            # 過濾出距離目標位置在指定半徑內的攝影機
+            nearby_cameras = []
+            for cam in cameras:
+                try:
+                    cam_lat = float(cam.get('lat', 0))
+                    cam_lon = float(cam.get('lon', 0))
+
+                    if cam_lat == 0 or cam_lon == 0:
+                        continue
+
+                    # 計算距離（簡易公式，單位：公里）
+                    distance = np.sqrt((cam_lat - lat)**2 + (cam_lon - lon)**2) * 111
+
+                    if distance <= radius:
+                        nearby_cameras.append({
+                            'id': cam.get('id', 'unknown'),
+                            'name': cam.get('name', 'Unknown Camera'),
+                            'lat': cam_lat,
+                            'lon': cam_lon,
+                            'cam_url': cam.get('cam_url', ''),  # 快照圖片URL
+                            'distance': round(distance, 2),
+                            'status': 'online'
+                        })
+                except:
+                    continue
+
+            # 按距離排序，返回最近的5個
+            if nearby_cameras:
+                nearby_cameras.sort(key=lambda x: x['distance'])
+                return nearby_cameras[:5], True
+
+        # 如果API失敗，返回備用資料
+        return get_fallback_cameras(), False
+
+    except Exception as e:
+        return get_fallback_cameras(), False
+
+def get_fallback_cameras():
+    """備用攝影機資料"""
+    return [
+        {
+            'id': 'demo_1',
+            'name': '成功大學光復校區',
+            'lat': 22.9971,
+            'lon': 120.2218,
+            'url': 'https://www.twipcam.com/camera/demo1',
+            'thumbnail': 'https://via.placeholder.com/400x300.png?text=Camera+1',
+            'status': 'online'
+        },
+        {
+            'id': 'demo_2',
+            'name': '台南市東區',
+            'lat': 22.9897,
+            'lon': 120.2247,
+            'url': 'https://www.twipcam.com/camera/demo2',
+            'thumbnail': 'https://via.placeholder.com/400x300.png?text=Camera+2',
+            'status': 'online'
+        }
+    ]
+
+@st.cache_data(ttl=600)
+def fetch_wind_data(lat=22.9971, lon=120.2218, zoom=11):
+    """
+    從 TwipCam API 獲取風向資料
+    參數:
+        lat: 緯度
+        lon: 經度
+        zoom: 地圖縮放程度
+    """
+    try:
+        url = f"https://www.twipcam.com/api/v1/map/wind?lat={lat}&lon={lon}&zoom={zoom}"
+
+        response = requests.get(url, timeout=10, verify=False)
+
+        if response.status_code == 200:
+            data = response.json()
+
+            # 根據API返回的格式解析風向資料
+            wind_info = {
+                'direction': data.get('direction', 0),  # 風向角度
+                'speed': data.get('speed', 0),  # 風速
+                'direction_text': data.get('direction_text', 'N'),  # 風向文字 (N, NE, E, etc.)
+                'speed_text': data.get('speed_text', '0 m/s'),
+                'timestamp': data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                'is_real': True
+            }
+            return wind_info, True
+
+        # API失敗時返回備用資料
+        return get_fallback_wind_data(), False
+
+    except Exception as e:
+        return get_fallback_wind_data(), False
+
+def get_fallback_wind_data():
+    """備用風向資料"""
+    import random
+    directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+    direction_degrees = [0, 45, 90, 135, 180, 225, 270, 315]
+
+    idx = random.randint(0, 7)
+
+    return {
+        'direction': direction_degrees[idx],
+        'speed': round(random.uniform(2.0, 8.0), 1),
+        'direction_text': directions[idx],
+        'speed_text': f"{round(random.uniform(2.0, 8.0), 1)} m/s",
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'is_real': False
+    }
+
+def get_wind_arrow_unicode(direction_text):
+    """根據風向返回箭頭符號"""
+    arrows = {
+        'N': '↓',   # 北風往南吹
+        'NE': '↙',
+        'E': '←',
+        'SE': '↖',
+        'S': '↑',
+        'SW': '↗',
+        'W': '→',
+        'NW': '↘'
+    }
+    return arrows.get(direction_text, '•')
+
+def get_opposite_direction(direction_text):
+    """獲取相反風向（污染物擴散方向）"""
+    opposites = {
+        'N': '南',
+        'NE': '西南',
+        'E': '西',
+        'SE': '西北',
+        'S': '北',
+        'SW': '東北',
+        'W': '東',
+        'NW': '東南'
+    }
+    return opposites.get(direction_text, '未知')
+
 # ===========================================
 # 災害情境模擬引擎
 # ===========================================
@@ -435,17 +592,17 @@ def get_disaster_info(scenario_name):
         },
         'air_pollution': {
             'title': '🏭 嚴重空氣污染',
-            'description': '有害氣體擴散中！請參考上方風向圖（GIF）進行避難。',
+            'description': '有害氣體擴散中！請參考即時風場地圖判斷避難方向。',
             'color': 'error',
             'actions': [
-                '判斷風向：請查看畫面上的風場動態圖',
+                '判斷風向：請查看即時風場動態地圖',
                 '避難原則：移動至「上風處」或室內緊閉門窗',
                 '開啟空氣清淨機，配戴 N95 口罩',
                 '若位於下風處，請盡速橫向移動脫離污染路徑',
                 '【室內避難】成功大學圖書館（密閉空間）(22.9978, 120.2185)',
                 '【室內避難】成功大學醫學院（空調系統）(22.9958, 120.2137)'
             ],
-            'gif_file': 'output1.gif',  # 使用專用的風場動態圖
+            'gif_file': 'output.gif',  # AI主播使用的GIF
             'contacts': [
                 '📞 環保局專線：06-2686751',
                 '📞 空污通報：0800-066-666（環境部）'
@@ -584,21 +741,44 @@ if view_mode == "指揮中心":
                 st.markdown("**🆘 緊急聯絡方式：**")
                 for contact in disaster_info['contacts']:
                     st.markdown(f"• {contact}")
-    
+
+    # AI 主播圖示（災害情境時顯示）
+    if scenario != 'normal':
+        st.markdown("---")
+        st.markdown("### 📺 AI 防災主播")
+        # 使用 display_gif 函數以置中方式顯示
+        gif_displayed = display_gif("output.gif", width_percent=40)
+        if not gif_displayed:
+            # 如果沒有 GIF，顯示提示
+            st.markdown("""
+            <div style="display: flex; justify-content: center; align-items: center;">
+                <img src="https://api.dicebear.com/7.x/bottts/svg?seed=taisafe"
+                     style="width: 300px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666;'>即時災害資訊播報</p>", unsafe_allow_html=True)
+
     # 關鍵指標
-    col1, col2, col3, col4 = st.columns(4)
-    
+    col1, col2, col3, col4, col5 = st.columns(5)
+
     avg_pm25 = air_data['pm25'].mean()
     max_pm25 = air_data['pm25'].max()
     active_stations = len(air_data[air_data['status'] != '設備異常'])
-    
+
+    # 獲取風向資料
+    wind_data, is_real_wind = fetch_wind_data(
+        lat=NCKU_CENTER['lat'],
+        lon=NCKU_CENTER['lon'],
+        zoom=11
+    )
+
     with col1:
         st.metric(
             "平均 PM2.5",
             f"{avg_pm25:.1f}",
             delta=f"最高: {max_pm25:.0f}" if scenario == 'normal' else "⚠️ 異常"
         )
-    
+
     with col2:
         risk_status = "正常" if scenario == 'normal' else disaster_info['title'].split()[1]
         st.metric(
@@ -606,46 +786,112 @@ if view_mode == "指揮中心":
             risk_status,
             delta="監控中" if scenario == 'normal' else "警報中"
         )
-    
+
     with col3:
         st.metric(
             "活躍監測站",
             f"{active_stations}/{len(air_data)}",
             delta="線上"
         )
-    
+
     with col4:
+        # 風向資訊
+        wind_arrow = get_wind_arrow_unicode(wind_data['direction_text'])
+        st.metric(
+            "風向/風速",
+            f"{wind_data['direction_text']} {wind_arrow}",
+            delta=f"{wind_data['speed']} m/s"
+        )
+        if not is_real_wind:
+            st.caption("📊 展示模式")
+
+    with col5:
         if scenario != 'normal':
             st.metric("避難人數", "1,847", delta="+1,847", delta_color="inverse")
         else:
             st.metric("資料更新", "即時", delta="5 分鐘前")
     
-    # 影片顯示（災害情境時）
+    # 災害監控影像（災害情境時）
     st.markdown("---")
-    
+
     if scenario != 'normal':
-        # 取得該情境的 GIF 檔案名稱
-        gif_filename = disaster_info.get('gif_file', 'output.gif')
-        
         st.subheader("📹 災害現場監控影像")
+
+        # 獲取即時影像串流
+        cameras, is_real_camera = fetch_twipcam_streams(
+            lat=NCKU_CENTER['lat'],
+            lon=NCKU_CENTER['lon'],
+            radius=10
+        )
+
         col_video, col_map = st.columns([1, 1])
-        
+
         with col_video:
-            # 顯示對應情境的 GIF 動畫
-            gif_displayed = display_gif(gif_filename, width_percent=100)
-            
-            if not gif_displayed:
-                # 如果沒有 GIF，顯示提示
-                st.markdown(f"""
-                <div style="background-color: #ffe6e6; padding: 20px; border-radius: 10px; text-align: center;">
-                    <h3>📹 現場監控</h3>
-                    <p>將 GIF 檔案命名為 <code>{gif_filename}</code><br/>放在與程式相同的目錄即可顯示</p>
-                </div>
-                """, unsafe_allow_html=True)
-        
+            # 顯示即時影像
+            if cameras and len(cameras) > 0:
+                st.markdown("**即時監控畫面**")
+
+                # 選擇要顯示的攝影機
+                camera_names = [f"{cam.get('name', f'Camera {i+1}')}" for i, cam in enumerate(cameras)]
+                selected_camera_idx = st.selectbox(
+                    "選擇攝影機",
+                    range(len(cameras)),
+                    format_func=lambda x: camera_names[x]
+                )
+
+                selected_camera = cameras[selected_camera_idx]
+
+                # 顯示攝影機資訊
+                distance_info = f"{selected_camera.get('distance', 0):.2f} km" if 'distance' in selected_camera else "N/A"
+                st.info(f"📍 **位置**: {selected_camera.get('name', 'Unknown')}\n"
+                       f"📏 **距離**: {distance_info}\n"
+                       f"🔴 **狀態**: {selected_camera.get('status', 'Unknown')}")
+
+                # 顯示即時快照影像
+                if 'cam_url' in selected_camera and selected_camera['cam_url']:
+                    # 顯示攝影機快照圖片
+                    try:
+                        st.image(selected_camera['cam_url'],
+                                caption=f"即時快照 - {selected_camera.get('name', 'Camera')}",
+                                use_container_width=True)
+                    except:
+                        # 如果圖片載入失敗，顯示備用GIF
+                        gif_filename = disaster_info.get('gif_file', 'output.gif')
+                        gif_displayed = display_gif(gif_filename, width_percent=100)
+                        if not gif_displayed:
+                            st.warning("⚠️ 無法連接即時影像")
+                else:
+                    # 備用：顯示 GIF 動畫
+                    gif_filename = disaster_info.get('gif_file', 'output.gif')
+                    gif_displayed = display_gif(gif_filename, width_percent=100)
+
+                    if not gif_displayed:
+                        st.warning("⚠️ 無法連接即時影像，請檢查攝影機狀態")
+
+                # 顯示資料來源
+                if not is_real_camera:
+                    st.caption("📊 展示模式（備用資料）")
+            else:
+                st.warning("⚠️ 目前無可用攝影機")
+
         with col_map:
             st.subheader("📍 災害分布圖")
-    
+
+            # 空污情境：顯示即時風場地圖
+            if scenario == 'air_pollution':
+                st.markdown("**即時風場動態**")
+                wind_map_url = f"https://www.twipcam.com/api/v1/map/wind?lat={NCKU_CENTER['lat']}&lon={NCKU_CENTER['lon']}&zoom=9"
+
+                st.markdown(f"""
+                <div style="border: 2px solid #ddd; border-radius: 10px; overflow: hidden;">
+                    <iframe src="{wind_map_url}"
+                            width="100%" height="400"
+                            frameborder="0" allowfullscreen>
+                    </iframe>
+                </div>
+                """, unsafe_allow_html=True)
+                st.caption("🌬️ 即時風場資料 - 協助判斷污染擴散方向")
+
     # 地圖視覺化
     if scenario != 'earthquake':
         st.subheader("📍 台南地區環境監測地圖（以成功大學為中心）")
@@ -752,72 +998,116 @@ else:  # 民眾手機端視角
     
     if 'user_location' not in st.session_state:
         st.session_state.user_location = NCKU_CENTER.copy()
-    
-    col_loc, col_info = st.columns([1, 2])
-    
-    with col_loc:
-        st.image("https://api.dicebear.com/7.x/shapes/svg?seed=location", width=80)
-    
-    with col_info:
-        st.info(f"📍 **目前位置**\n成功大學附近\n({st.session_state.user_location['lat']:.4f}, {st.session_state.user_location['lon']:.4f})")
+
+    # 顯示目前位置（移除橘色icon）
+    st.info(f"📍 **目前位置**\n成功大學附近\n({st.session_state.user_location['lat']:.4f}, {st.session_state.user_location['lon']:.4f})")
     
     avg_pm25_mobile = air_data['pm25'].mean()
     
     if scenario != 'normal':
         st.markdown("---")
-        
+
         if use_persona:
-            col_avatar, col_message = st.columns([1, 4])
-            with col_avatar:
-                # AI 助理始終顯示 output.gif（不受情境影響）
-                gif_displayed = display_gif("output.gif", width_percent=100)
-                
-                if not gif_displayed:
-                    # 如果沒有 GIF，顯示原本的圖片作為後備
-                    st.image("https://api.dicebear.com/7.x/bottts/svg?seed=taisafe", width=100)
-            
-            with col_message:
-                st.error(f"### {disaster_info['title']}")
-                st.markdown(f"**{disaster_info['description']}**")
-                
-                if disaster_info['actions']:
-                    st.markdown("**請立即執行:**")
-                    for action in disaster_info['actions'][:4]:  # 顯示前 4 項
-                        st.markdown(f"• {action}")
+            # AI 主播圖示 - 獨立一行、置中、變大
+            st.markdown("### 📺 AI 防災主播")
+            # AI 助理始終顯示 output.gif（不受情境影響）
+            gif_displayed = display_gif("output.gif", width_percent=50)
+
+            if not gif_displayed:
+                # 如果沒有 GIF，顯示原本的圖片作為後備
+                st.markdown("""
+                <div style="display: flex; justify-content: center; align-items: center;">
+                    <img src="https://api.dicebear.com/7.x/bottts/svg?seed=taisafe"
+                         style="width: 200px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                </div>
+                """, unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: #666; margin-bottom: 20px;'>即時災害警報</p>", unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # 災害訊息
+            st.error(f"### {disaster_info['title']}")
+            st.markdown(f"**{disaster_info['description']}**")
+
+            if disaster_info['actions']:
+                st.markdown("**請立即執行:**")
+                for action in disaster_info['actions'][:4]:  # 顯示前 4 項
+                    st.markdown(f"• {action}")
         else:
             st.error(f"### {disaster_info['title']}")
             st.markdown(f"{disaster_info['description']}")
         
-        # 空氣污染情境：顯示風場圖（在按鈕上方）
+        # 空氣污染情境：顯示風場圖和即時風向（在按鈕上方）
         if scenario == 'air_pollution':
             st.markdown("---")
-            st.markdown("### 📊 風場動態參考圖")
-            
-            gif_displayed = display_gif("output1.gif", width_percent=80)
-            
-            if not gif_displayed:
-                st.info("💡 請將風場動態圖命名為 `output1.gif` 並放在專案目錄")
-            else:
-                st.caption("⬆️ 請根據風向圖判斷安全避難方向（移動至上風處）")
-            
+
+            # 顯示即時風向資料
+            wind_data_mobile, is_real_wind_mobile = fetch_wind_data(
+                lat=st.session_state.user_location['lat'],
+                lon=st.session_state.user_location['lon'],
+                zoom=11
+            )
+
+            st.markdown("### 🌬️ 即時風向資訊")
+            col_wind1, col_wind2 = st.columns(2)
+
+            with col_wind1:
+                wind_arrow = get_wind_arrow_unicode(wind_data_mobile['direction_text'])
+                st.metric(
+                    "風向",
+                    f"{wind_data_mobile['direction_text']} {wind_arrow}",
+                    delta="請往上風處移動"
+                )
+
+            with col_wind2:
+                st.metric(
+                    "風速",
+                    f"{wind_data_mobile['speed']} m/s",
+                    delta=wind_data_mobile['timestamp'].split()[1] if ' ' in wind_data_mobile['timestamp'] else ''
+                )
+
+            if not is_real_wind_mobile:
+                st.caption("📊 展示模式（備用資料）")
+
+            st.info(f"💡 **避難提示**: 目前風向為 {wind_data_mobile['direction_text']}，污染物將往 {get_opposite_direction(wind_data_mobile['direction_text'])} 方向擴散。請盡快移動至上風處或室內避難。")
+
+            st.markdown("---")
+            st.markdown("### 📊 即時風場動態圖")
+
+            # 使用 TwipCam Wind API 嵌入即時風場地圖
+            wind_map_url = f"https://www.twipcam.com/api/v1/map/wind?lat={st.session_state.user_location['lat']}&lon={st.session_state.user_location['lon']}&zoom=10"
+
+            st.markdown(f"""
+            <div style="border: 2px solid #ddd; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <iframe src="{wind_map_url}"
+                        width="100%" height="500"
+                        frameborder="0" allowfullscreen
+                        style="border-radius: 10px;">
+                </iframe>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.caption("🌬️ 即時風場資料 - 請根據風向圖判斷安全避難方向（移動至上風處）")
+            st.caption("📍 地圖中心: 成功大學附近")
+
             st.markdown("---")
         
-        # 緊急聯絡按鈕
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("🏃 查看避難路線", type="primary", use_container_width=True):
-                st.success("✅ 正在規劃最近避難所路線...")
-                # 顯示避難地點資訊
-                if disaster_info['actions']:
-                    st.info("**避難地點：**\n" + "\n".join([a for a in disaster_info['actions'] if '【' in a]))
-        with col_b:
-            if st.button("📞 緊急聯絡", use_container_width=True):
-                # 顯示該情境的緊急聯絡方式
-                if 'contacts' in disaster_info and disaster_info['contacts']:
-                    for contact in disaster_info['contacts']:
-                        st.info(contact)
-                else:
-                    st.info("📱 撥打 119 / 110")
+        # 緊急聯絡資訊直接顯示
+        st.markdown("### 🆘 緊急聯絡方式")
+        if 'contacts' in disaster_info and disaster_info['contacts']:
+            for contact in disaster_info['contacts']:
+                st.info(contact)
+        else:
+            st.info("📱 撥打 119 / 110")
+
+        st.markdown("---")
+
+        # 避難路線按鈕
+        if st.button("🏃 查看避難路線", type="primary", use_container_width=True):
+            st.success("✅ 正在規劃最近避難所路線...")
+            # 顯示避難地點資訊
+            if disaster_info['actions']:
+                st.info("**避難地點：**\n" + "\n".join([a for a in disaster_info['actions'] if '【' in a]))
     
     else:
         st.success("✅ 目前所在區域安全")
