@@ -168,65 +168,125 @@ def get_fallback_water_data():
 def fetch_real_air_quality():
     """從環境部開放平台抓取台南地區空氣品質資料"""
     try:
-        url = "https://data.moenv.gov.tw/api/v2/aqx_p_432?limit=1000&api_key=e8dd42e6-9b8b-43f8-991e-b3dee723a52d"
-        response = requests.get(url, timeout=10, verify=False)
-        
+        # 嘗試不使用 API key 的公開端點
+        url = "https://data.moenv.gov.tw/api/v2/aqx_p_432?limit=1000&format=json&api_key=8ce6082f-f93f-45d2-b78f-af52ba661784"
+        response = requests.get(url, timeout=15, verify=False)
+
         if response.status_code == 200:
             data = response.json()
             records = data.get('records', [])
-            
+
+            if not records:
+                # 如果沒有 records，可能數據在根層級
+                if isinstance(data, list):
+                    records = data
+
             tainan_data = []
             for record in records:
                 county = record.get('county', '')
+                sitename = record.get('sitename', '')
+
+                # 檢查是否為台南市的測站
                 if '台南' in county or '臺南' in county:
                     try:
-                        lat = float(record.get('latitude', 0))
-                        lon = float(record.get('longitude', 0))
-                        
+                        # 處理經緯度
+                        lat_str = record.get('latitude', '0')
+                        lon_str = record.get('longitude', '0')
+
+                        # 如果是字符串，嘗試轉換
+                        try:
+                            lat = float(lat_str) if lat_str else 0
+                            lon = float(lon_str) if lon_str else 0
+                        except:
+                            lat = 0
+                            lon = 0
+
+                        # 如果沒有座標，使用測站名稱估計座標
+                        if lat == 0 or lon == 0:
+                            # 台南市各測站的大致座標
+                            station_coords = {
+                                '安南': (23.0486, 120.2175),
+                                '善化': (23.1158, 120.2969),
+                                '新營': (23.3055, 120.3167),
+                                '台南': (22.9833, 120.2025),
+                                '臺南': (22.9833, 120.2025),
+                                '林森': (22.9917, 120.2042),
+                            }
+
+                            for station_key, coords in station_coords.items():
+                                if station_key in sitename:
+                                    lat, lon = coords
+                                    break
+
                         if lat == 0 or lon == 0:
                             continue
-                        
-                        distance = np.sqrt((lat - NCKU_CENTER['lat'])**2 + 
+
+                        distance = np.sqrt((lat - NCKU_CENTER['lat'])**2 +
                                          (lon - NCKU_CENTER['lon'])**2) * 111
-                        
-                        pm25_val = record.get('pm2.5', '')
-                        if pm25_val in ['', None, 'ND', '-']:
+
+                        # 處理 PM2.5 數值（嘗試多種欄位名稱）
+                        pm25_val = record.get('pm2.5') or record.get('PM2.5') or record.get('pm25') or ''
+                        if pm25_val in ['', None, 'ND', '-', 'N/A', 'NA']:
                             pm25_val = 0
                         else:
-                            pm25_val = float(pm25_val)
-                        
-                        pm10_val = record.get('pm10', '')
-                        if pm10_val in ['', None, 'ND', '-']:
+                            try:
+                                pm25_val = float(str(pm25_val).strip())
+                            except:
+                                pm25_val = 0
+
+                        # 處理 PM10 數值（嘗試多種欄位名稱）
+                        pm10_val = record.get('pm10') or record.get('PM10') or ''
+                        if pm10_val in ['', None, 'ND', '-', 'N/A', 'NA']:
                             pm10_val = 0
                         else:
-                            pm10_val = float(pm10_val)
-                        
+                            try:
+                                pm10_val = float(str(pm10_val).strip())
+                            except:
+                                pm10_val = 0
+
+                        # 處理 AQI 數值（嘗試多種欄位名稱）
+                        aqi_val = record.get('aqi') or record.get('AQI') or ''
+                        if aqi_val in ['', None, 'ND', '-', 'N/A', 'NA']:
+                            aqi_val = 'N/A'
+                        else:
+                            try:
+                                # 轉換為整數字符串
+                                aqi_val = str(int(float(str(aqi_val).strip())))
+                            except:
+                                aqi_val = 'N/A'
+
+                        # 處理狀態
+                        status_val = record.get('status') or record.get('Status') or '良好'
+
                         tainan_data.append({
-                            'sitename': record.get('sitename', 'Unknown'),
+                            'sitename': sitename,
                             'lat': lat,
                             'lon': lon,
                             'pm25': pm25_val,
                             'pm10': pm10_val,
-                            'aqi': record.get('aqi', 'N/A'),
-                            'status': record.get('status', '良好'),
-                            'o3': record.get('o3', '-'),
-                            'co': record.get('co', '-'),
-                            'so2': record.get('so2', '-'),
-                            'no2': record.get('no2', '-'),
-                            'publishtime': record.get('publishtime', ''),
+                            'aqi': aqi_val,
+                            'status': status_val,
+                            'o3': record.get('o3') or record.get('O3') or '-',
+                            'co': record.get('co') or record.get('CO') or '-',
+                            'so2': record.get('so2') or record.get('SO2') or '-',
+                            'no2': record.get('no2') or record.get('NO2') or '-',
+                            'publishtime': record.get('publishtime') or record.get('PublishTime') or '',
                             'distance_to_ncku': distance
                         })
-                    except:
+                    except Exception as e:
+                        # 靜默跳過單個記錄的錯誤
                         continue
-            
+
             if tainan_data:
                 df = pd.DataFrame(tainan_data)
                 df = df.sort_values('distance_to_ncku').reset_index(drop=True)
                 return df, True
-        
+
+        # API 失敗時返回備用資料
         return get_fallback_air_data(), False
-        
-    except:
+
+    except Exception as e:
+        # 如果發生任何錯誤，返回備用資料
         return get_fallback_air_data(), False
 
 @st.cache_data(ttl=600)
@@ -377,38 +437,134 @@ def fetch_wind_data(lat=22.9971, lon=120.2218, zoom=11):
         if response.status_code == 200:
             data = response.json()
 
-            # 根據API返回的格式解析風向資料
-            wind_info = {
-                'direction': data.get('direction', 0),  # 風向角度
-                'speed': data.get('speed', 0),  # 風速
-                'direction_text': data.get('direction_text', 'N'),  # 風向文字 (N, NE, E, etc.)
-                'speed_text': data.get('speed_text', '0 m/s'),
-                'timestamp': data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
-                'is_real': True
-            }
-            return wind_info, True
+            # 解析 GRIB 格點資料
+            # data['data'] 是一個列表，包含 eastward_wind 和 northward_wind
+            u_component = None  # eastward wind (東西向)
+            v_component = None  # northward wind (南北向)
 
-        # API失敗時返回備用資料
+            for item in data.get('data', []):
+                header = item.get('header', {})
+                param_name = header.get('parameterNumberName', '')
+
+                if param_name == 'eastward_wind':
+                    # 取格點資料的中間點作為代表值
+                    wind_data_array = item.get('data', [])
+                    if wind_data_array:
+                        u_component = wind_data_array[len(wind_data_array) // 2]
+
+                elif param_name == 'northward_wind':
+                    wind_data_array = item.get('data', [])
+                    if wind_data_array:
+                        v_component = wind_data_array[len(wind_data_array) // 2]
+
+            # 如果成功獲取 u 和 v 分量，計算風向和風速
+            if u_component is not None and v_component is not None:
+                direction_deg, speed, direction_text = calculate_wind_direction_and_speed(u_component, v_component)
+
+                # 獲取時間戳
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                if data.get('data') and len(data['data']) > 0:
+                    ref_time = data['data'][0].get('header', {}).get('refTime', '')
+                    if ref_time:
+                        timestamp = ref_time
+
+                wind_info = {
+                    'direction': round(direction_deg, 1),  # 風向角度
+                    'speed': round(speed, 1),  # 風速 (m/s)
+                    'direction_text': direction_text,  # 風向文字 (N, NE, E, etc.)
+                    'speed_text': f"{round(speed, 1)} m/s",
+                    'timestamp': timestamp,
+                    'is_real': True
+                }
+                return wind_info, True
+
+        # API 失敗時使用季節性歷史資料
         return get_fallback_wind_data(), False
 
     except Exception as e:
+        # 發生錯誤時使用季節性歷史資料
         return get_fallback_wind_data(), False
 
-def get_fallback_wind_data():
-    """備用風向資料"""
-    import random
-    directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-    direction_degrees = [0, 45, 90, 135, 180, 225, 270, 315]
+def calculate_wind_direction_and_speed(u, v):
+    """
+    從 u, v 風分量計算風向和風速
+    參數:
+        u: 東西向風速 (m/s)，正值表示向東
+        v: 南北向風速 (m/s)，正值表示向北
+    返回:
+        direction: 風向角度 (0-360度，0度為北風)
+        speed: 風速 (m/s)
+        direction_text: 風向文字 (N, NE, E, SE, S, SW, W, NW)
+    """
+    import math
 
-    idx = random.randint(0, 7)
+    # 計算風速
+    speed = math.sqrt(u**2 + v**2)
+
+    # 計算風向角度（風從哪裡來）
+    # atan2(y, x) 返回的是風往哪裡去，所以要加負號
+    direction_rad = math.atan2(-u, -v)
+    direction_deg = math.degrees(direction_rad)
+
+    # 轉換為 0-360 度
+    if direction_deg < 0:
+        direction_deg += 360
+
+    # 轉換為方位文字
+    direction_text = degree_to_direction_text(direction_deg)
+
+    return direction_deg, speed, direction_text
+
+def degree_to_direction_text(degree):
+    """
+    將角度轉換為方位文字
+    0度 = 北 (N), 90度 = 東 (E), 180度 = 南 (S), 270度 = 西 (W)
+    """
+    directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+    # 每個方位覆蓋 45 度，加上 22.5 度偏移來四捨五入到最近的方位
+    index = int((degree + 22.5) / 45) % 8
+    return directions[index]
+
+def get_fallback_wind_data():
+    """
+    備用風向資料 - 基於台南地區季節性歷史風向
+    台南氣候特徵：
+    - 冬季（11-3月）：東北季風盛行，風向 NE
+    - 夏季（5-9月）：西南季風盛行，風向 SW
+    - 春季（4月）：季風轉換期，風向 E-SE
+    - 秋季（10月）：季風轉換期，風向 E-NE
+    """
+    current_month = datetime.now().month
+
+    # 根據月份設定台南地區的典型季節風向
+    if current_month in [11, 12, 1, 2, 3]:
+        # 冬季：東北季風
+        direction_text = 'NE'
+        direction_deg = 45
+        typical_speed = 4.5  # 冬季風速較強
+    elif current_month in [5, 6, 7, 8, 9]:
+        # 夏季：西南季風
+        direction_text = 'SW'
+        direction_deg = 225
+        typical_speed = 3.5  # 夏季風速較弱
+    elif current_month == 4:
+        # 春季過渡期：偏東風
+        direction_text = 'E'
+        direction_deg = 90
+        typical_speed = 3.0
+    else:  # 10月
+        # 秋季過渡期：東北東風
+        direction_text = 'NE'
+        direction_deg = 45
+        typical_speed = 3.8
 
     return {
-        'direction': direction_degrees[idx],
-        'speed': round(random.uniform(2.0, 8.0), 1),
-        'direction_text': directions[idx],
-        'speed_text': f"{round(random.uniform(2.0, 8.0), 1)} m/s",
+        'direction': direction_deg,
+        'speed': typical_speed,
+        'direction_text': direction_text,
+        'speed_text': f"{typical_speed} m/s",
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'is_real': False
+        'is_real': False  # 標記為歷史資料
     }
 
 def get_wind_arrow_unicode(direction_text):
@@ -515,16 +671,27 @@ class DisasterScenario:
 def prepare_map_data(df, scenario=None):
     if df is None:
         return None
-    
+
+    # 創建副本以避免修改原始數據
+    df = df.copy()
+
     if scenario == 'normal':
-        df['color'] = df['pm25'].apply(lambda x: 
+        # 根據 PM2.5 值設置顏色
+        df['color'] = df['pm25'].apply(lambda x:
             [0, 255, 0, 200] if x <= 35 else
             [255, 255, 0, 200] if x <= 53 else
             [255, 126, 0, 200] if x <= 70 else
             [255, 0, 0, 220]
         )
+        # 設置半徑大小
         df['radius'] = 30 + (df['pm25'] / 150) * 30
-    
+    else:
+        # 確保其他情境下也有默認的 color 和 radius
+        if 'color' not in df.columns:
+            df['color'] = [[100, 100, 100, 200]] * len(df)
+        if 'radius' not in df.columns:
+            df['radius'] = 40
+
     return df
 
 def get_disaster_info(scenario_name):
@@ -654,10 +821,10 @@ scenario = st.sidebar.selectbox(
 
 st.sidebar.markdown("---")
 
-# 視角選擇
+# 視角選擇（默認為民眾手機端）
 view_mode = st.sidebar.radio(
     "👁️ 選擇視角",
-    ["指揮中心", "民眾手機端"]
+    ["民眾手機端", "指揮中心"]
 )
 
 if view_mode == "民眾手機端":
@@ -803,7 +970,7 @@ if view_mode == "指揮中心":
             delta=f"{wind_data['speed']} m/s"
         )
         if not is_real_wind:
-            st.caption("📊 展示模式")
+            st.caption("📊 季節性歷史資料")
 
     with col5:
         if scenario != 'normal':
@@ -948,7 +1115,7 @@ if view_mode == "指揮中心":
                     "padding": "10px"
                 }
             },
-            map_style='mapbox://styles/mapbox/light-v11'
+            map_style='https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
         )
         
         st.pydeck_chart(deck)
@@ -1001,7 +1168,72 @@ else:  # 民眾手機端視角
 
     # 顯示目前位置（移除橘色icon）
     st.info(f"📍 **目前位置**\n成功大學附近\n({st.session_state.user_location['lat']:.4f}, {st.session_state.user_location['lon']:.4f})")
-    
+
+    # 顯示地圖
+    st.markdown("---")
+    st.subheader("🗺️ 環境監測地圖")
+
+    try:
+        # 建立測站圖層
+        station_layer_mobile = pdk.Layer(
+            "ScatterplotLayer",
+            data=air_data,
+            get_position='[lon, lat]',
+            get_fill_color='color',
+            get_radius='radius',
+            pickable=True,
+            stroked=True,
+            filled=True,
+            get_line_color=[255, 255, 255],
+            line_width_min_pixels=2,
+        )
+
+        # 目前位置標記
+        current_location_marker = pdk.Layer(
+            "ScatterplotLayer",
+            data=pd.DataFrame([st.session_state.user_location]),
+            get_position='[lon, lat]',
+            get_fill_color=[0, 100, 255],
+            get_radius=60,
+            pickable=True,
+            stroked=True,
+            filled=True,
+            get_line_color=[255, 255, 255],
+            line_width_min_pixels=3,
+        )
+
+        view_state_mobile = pdk.ViewState(
+            latitude=st.session_state.user_location['lat'],
+            longitude=st.session_state.user_location['lon'],
+            zoom=12,
+            pitch=0,
+            bearing=0
+        )
+
+        deck_mobile = pdk.Deck(
+            layers=[station_layer_mobile, current_location_marker],
+            initial_view_state=view_state_mobile,
+            tooltip={
+                "html": "<b>測站:</b> {sitename}<br/>"
+                       "<b>PM2.5:</b> {pm25}<br/>"
+                       "<b>AQI:</b> {aqi}<br/>"
+                       "<b>狀態:</b> {status}",
+                "style": {
+                    "backgroundColor": "steelblue",
+                    "color": "white",
+                    "fontSize": "12px",
+                    "padding": "8px"
+                }
+            },
+            map_style='https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+        )
+
+        st.pydeck_chart(deck_mobile)
+        st.caption("🔵 您的位置 | 🟢 良好 | 🟡 普通 | 🟠 對敏感族群不健康 | 🔴 不健康")
+
+    except Exception as e:
+        st.warning("⚠️ 地圖載入中...")
+
     avg_pm25_mobile = air_data['pm25'].mean()
     
     if scenario != 'normal':
@@ -1048,6 +1280,7 @@ else:  # 民眾手機端視角
                 zoom=11
             )
 
+            # 顯示風向資訊
             st.markdown("### 🌬️ 即時風向資訊")
             col_wind1, col_wind2 = st.columns(2)
 
@@ -1067,7 +1300,7 @@ else:  # 民眾手機端視角
                 )
 
             if not is_real_wind_mobile:
-                st.caption("📊 展示模式（備用資料）")
+                st.caption("📊 使用季節性歷史資料（基於台南地區氣候特徵）")
 
             st.info(f"💡 **避難提示**: 目前風向為 {wind_data_mobile['direction_text']}，污染物將往 {get_opposite_direction(wind_data_mobile['direction_text'])} 方向擴散。請盡快移動至上風處或室內避難。")
 
@@ -1115,24 +1348,84 @@ else:  # 民眾手機端視角
         st.metric("即時 PM2.5", f"{avg_pm25_mobile:.1f}", pm25_status)
     
     st.markdown("---")
-    st.subheader("📍 附近監測站")
-    
-    nearest_stations = air_data.head(5)
-    
-    for _, station in nearest_stations.iterrows():
-        col1, col2, col3 = st.columns([3, 1, 1])
-        
-        with col1:
-            st.write(f"**{station['sitename']}**")
-            st.caption(f"{station['distance_to_ncku']:.2f} km")
-        
-        with col2:
-            pm25_color = "🟢" if station['pm25'] < 35 else "🟡" if station['pm25'] < 53 else "🔴"
-            st.metric("PM2.5", f"{station['pm25']:.0f}")
-        
-        with col3:
-            st.write(pm25_color)
-            st.caption(station['status'])
+
+    # 根據情境顯示不同內容
+    if scenario != 'normal':
+        # 災害情境：顯示監控影像
+        st.subheader("📹 災害現場監控影像")
+
+        # 獲取即時影像串流
+        cameras_mobile, is_real_camera_mobile = fetch_twipcam_streams(
+            lat=st.session_state.user_location['lat'],
+            lon=st.session_state.user_location['lon'],
+            radius=10
+        )
+
+        if cameras_mobile and len(cameras_mobile) > 0:
+            st.markdown("**即時監控畫面**")
+
+            # 選擇要顯示的攝影機
+            camera_names_mobile = [f"{cam.get('name', f'Camera {i+1}')} ({cam.get('distance', 0):.1f} km)" for i, cam in enumerate(cameras_mobile)]
+            selected_camera_idx_mobile = st.selectbox(
+                "選擇攝影機",
+                range(len(cameras_mobile)),
+                format_func=lambda x: camera_names_mobile[x],
+                key="mobile_camera_select"
+            )
+
+            selected_camera_mobile = cameras_mobile[selected_camera_idx_mobile]
+
+            # 顯示攝影機資訊
+            distance_info_mobile = f"{selected_camera_mobile.get('distance', 0):.2f} km" if 'distance' in selected_camera_mobile else "N/A"
+            st.info(f"📍 **位置**: {selected_camera_mobile.get('name', 'Unknown')}\n"
+                   f"📏 **距離**: {distance_info_mobile}\n"
+                   f"🔴 **狀態**: {selected_camera_mobile.get('status', 'Unknown')}")
+
+            # 顯示即時快照影像
+            if 'cam_url' in selected_camera_mobile and selected_camera_mobile['cam_url']:
+                try:
+                    st.image(selected_camera_mobile['cam_url'],
+                            caption=f"即時快照 - {selected_camera_mobile.get('name', 'Camera')}",
+                            use_container_width=True)
+                except:
+                    # 如果圖片載入失敗，顯示備用GIF
+                    gif_filename = disaster_info.get('gif_file', 'output.gif')
+                    gif_displayed = display_gif(gif_filename, width_percent=100)
+                    if not gif_displayed:
+                        st.warning("⚠️ 無法連接即時影像")
+            else:
+                # 備用：顯示 GIF 動畫
+                gif_filename = disaster_info.get('gif_file', 'output.gif')
+                gif_displayed = display_gif(gif_filename, width_percent=100)
+                if not gif_displayed:
+                    st.warning("⚠️ 無法連接即時影像，請檢查攝影機狀態")
+
+            # 顯示資料來源
+            if not is_real_camera_mobile:
+                st.caption("📊 展示模式（備用資料）")
+        else:
+            st.warning("⚠️ 目前無可用攝影機")
+
+    else:
+        # 正常情境：顯示附近監測站
+        st.subheader("📍 附近監測站")
+
+        nearest_stations = air_data.head(5)
+
+        for _, station in nearest_stations.iterrows():
+            col1, col2, col3 = st.columns([3, 1, 1])
+
+            with col1:
+                st.write(f"**{station['sitename']}**")
+                st.caption(f"{station['distance_to_ncku']:.2f} km")
+
+            with col2:
+                pm25_color = "🟢" if station['pm25'] < 35 else "🟡" if station['pm25'] < 53 else "🔴"
+                st.metric("PM2.5", f"{station['pm25']:.0f}")
+
+            with col3:
+                st.write(pm25_color)
+                st.caption(station['status'])
 
 # 頁尾
 st.markdown("---")
