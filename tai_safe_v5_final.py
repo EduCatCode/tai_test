@@ -1406,6 +1406,33 @@ else:  # 民眾手機端視角
         else:
             st.warning("⚠️ 目前無可用攝影機")
 
+        # 根據災害類型顯示模擬異常數據
+        if scenario == 'water_contamination':
+            st.markdown("---")
+            st.subheader("💧 河川水質監測數據（模擬異常數據）")
+            # 創建模擬異常水質數據
+            abnormal_water_data = water_data.copy()
+            # 模擬異常:提高污染指標
+            abnormal_water_data['ph'] = abnormal_water_data['ph'].apply(lambda x: round(float(x) * 0.8, 2) if isinstance(x, (int, float, str)) and str(x).replace('.', '').isdigit() else x)
+            abnormal_water_data['do'] = abnormal_water_data['do'].apply(lambda x: round(float(x) * 0.5, 2) if isinstance(x, (int, float, str)) and str(x).replace('.', '').isdigit() else x)
+            abnormal_water_data['bod'] = abnormal_water_data['bod'].apply(lambda x: round(float(x) * 3.0, 2) if isinstance(x, (int, float, str)) and str(x).replace('.', '').isdigit() else x)
+            abnormal_water_data['nh3n'] = abnormal_water_data['nh3n'].apply(lambda x: round(float(x) * 5.0, 2) if isinstance(x, (int, float, str)) and str(x).replace('.', '').isdigit() else x)
+            abnormal_water_data['rpi'] = abnormal_water_data['rpi'].apply(lambda x: round(float(x) * 2.5, 2) if isinstance(x, (int, float, str)) and str(x).replace('.', '').isdigit() else x)
+            st.dataframe(abnormal_water_data.head(10), use_container_width=True, hide_index=True)
+
+        elif scenario == 'air_pollution':
+            st.markdown("---")
+            st.subheader("📊 空氣品質監測站數據（模擬異常數據）")
+            # 創建模擬異常空氣數據 - 使用已經由 DisasterScenario.air_pollution 處理過的 air_data
+            # air_data 在此情境下已經包含了異常高的 PM2.5 和 PM10 數值
+            display_cols = ['sitename', 'pm25', 'pm10', 'aqi', 'status', 'distance_to_ncku']
+            display_df_abnormal = air_data[display_cols].copy()
+            display_df_abnormal.columns = ['測站', 'PM2.5', 'PM10', 'AQI', '狀態', '距成大(km)']
+            display_df_abnormal['PM2.5'] = display_df_abnormal['PM2.5'].round(1)
+            display_df_abnormal['PM10'] = display_df_abnormal['PM10'].round(1)
+            display_df_abnormal['距成大(km)'] = display_df_abnormal['距成大(km)'].round(2)
+            st.dataframe(display_df_abnormal.head(10), use_container_width=True, hide_index=True)
+
     else:
         # 正常情境：顯示附近監測站
         st.subheader("📍 附近監測站")
@@ -1426,6 +1453,21 @@ else:  # 民眾手機端視角
             with col3:
                 st.write(pm25_color)
                 st.caption(station['status'])
+
+        # 顯示詳細監測數據
+        st.markdown("---")
+        st.subheader("📊 空氣品質監測站數據")
+        display_cols = ['sitename', 'pm25', 'pm10', 'aqi', 'status', 'distance_to_ncku']
+        display_df = air_data[display_cols].copy()
+        display_df.columns = ['測站', 'PM2.5', 'PM10', 'AQI', '狀態', '距成大(km)']
+        display_df['PM2.5'] = display_df['PM2.5'].round(1)
+        display_df['PM10'] = display_df['PM10'].round(1)
+        display_df['距成大(km)'] = display_df['距成大(km)'].round(2)
+        st.dataframe(display_df.head(10), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.subheader("💧 河川水質監測數據")
+        st.dataframe(water_data.head(10), use_container_width=True, hide_index=True)
 
 # 頁尾
 st.markdown("---")
