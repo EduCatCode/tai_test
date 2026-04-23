@@ -1,1 +1,87 @@
-# TAI-SAFE V5 Final 
+# TAI-SAFE 智慧國土防災決策支援平台
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg.svg)](https://taitest-jfdutxpfwvs4qbpzj7abks.streamlit.app/)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/EduCatCode/tai_test)
+
+## 專案簡介
+**TAI-SAFE (Tainan AI-driven Safety & Emergency System)** 是一個整合「即時監測、AI 決策輔助、災情視覺化」的智慧國土防災平台。本系統專為**國立成功大學**與**台南市**區域設計，串接環境部與 TwipCam 實時數據，能在災害發生時快速切換「指揮中心」與「民眾手機」雙重視角，提供精準的避難指引。
+
+---
+
+## 核心技術與功能
+
+### 1. 實時監測與數據驅動 (Real-time Monitoring)
+- **環境監測**: 自動串接環境部 (MOENV) API，獲取台南地區所有測站的空氣品質 (AQI, PM2.5, PM10) 與河川水質數據。
+- **動態風場系統**: 串接 TwipCam 風場 API，即時計算 U/V 分量並視覺化，協助判斷化學災害或空污擴散方向。
+- **即時影像串流**: 定位成功大學半徑 10 公里內之 TwipCam 即時監視器，掌握第一線現場實況。
+
+### 2. 五大災害情境模擬 (Disaster Scenarios)
+系統內建模擬引擎，可模擬以下情境並提供對應行動建議：
+- **地震發生**: 自動計算震度影響範圍，導引至成大光復校區操場。
+- **淹水警報**: 根據緯度模擬低窪地區淹水深度，指示垂直避難點。
+- **空氣污染**: 結合風場地圖，自動判斷「上風處」安全路徑。
+- **水質污染**: 偵測河川異常，發布重金屬超標警報。
+- **空襲警報**: 標示周邊防空避難設施位置。
+
+### 3. AI 防災主播助理
+- 整合 **AI 虛擬助理 (output.gif)**，在災害發生時以視覺化方式呈現應變指令。
+- 針對不同情境自動切換避難建議清單。
+
+### 4. 雙視角響應式設計 (Dual-View Mode)
+- **指揮中心模式**: 大螢幕佈局，強調全局環境數據指標與即時影像監控。
+- **民眾手機端**: 輕量化介面，提供 LBS 定位、最近避難所導航與緊急聯絡按鈕。
+
+---
+
+## 系統介面展示
+
+### 指揮中心模式 (戰情室介面)
+![指揮中心全景監控](output.png)
+*圖 1：戰情室主畫面，整合即時環境指標與台南地區監測站地圖。*
+
+### 民眾行動端視角
+| 即時避難地圖 | 災害影像監控 |
+| :---: | :---: |
+| ![地圖](output.png) | ![影像](output.png) |
+*圖 2：民眾可透過手機定位，即時查看周邊監測數值與安全狀態。*
+
+### 即時風場與污染路徑
+![風場模擬](spindle_current_analysis.png)
+*圖 3：在空氣污染情境下，系統會顯示即時風場動態圖，協助民眾判斷避難方向。*
+
+---
+
+## 🛠 系統架構
+- **前端架構**: [Streamlit](https://streamlit.io/) (Python-based Web Framework)
+- **地圖渲染**: [Pydeck](https://deck.gl/) (WebGL 高效能地圖)
+- **資料來源**: 
+  - 環境部開放資料平台 (Air/Water Quality API)
+  - TwipCam (Camera/Wind API)
+  - 中央氣象署 (Weather Warning API)
+
+---
+
+## 快速開始
+
+### 1. 安裝環境
+請確保您的系統已安裝 Python 3.8+。
+```bash
+git clone https://github.com/EduCatCode/tai_test.git
+cd tai_test
+pip install streamlit pandas numpy pydeck requests urllib3
+```
+
+### 2. 啟動平台
+```bash
+streamlit run tai_safe_v5_final.py
+```
+
+---
+
+## 避難據點參考 (依大學里防災地圖)
+- **地震避難**: 國立成功大學光復校區操場、台南一中操場。
+- **淹水收容**: 大學東寧社區聯合活動中心。
+- **化災避難**: 成大圖書館、成大醫學院。
+
+---
+**專案開發**: TAI-SAFE Project
