@@ -1,8 +1,5 @@
 # TAI-SAFE 智慧國土防災決策支援平台
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg.svg)](https://taitest-jfdutxpfwvs4qbpzj7abks.streamlit.app/)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/EduCatCode/tai_test)
-
 ## 專案簡介
 **TAI-SAFE (Tainan AI-driven Safety & Emergency System)** 是一個整合「即時監測、AI 決策輔助、災情視覺化」的智慧國土防災平台。本系統專為**國立成功大學**與**台南市**區域設計，串接環境部與 TwipCam 實時數據，能在災害發生時快速切換「指揮中心」與「民眾手機」雙重視角，提供精準的避難指引。
 
